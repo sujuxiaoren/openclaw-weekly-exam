@@ -152,7 +152,7 @@ def load_question_bank(excel_path):
     return question_db
 
 
-async def run_exam(name, phone, city, env_key, wait_seconds, excel_path, output_dir):
+async def run_exam(name, phone, city, env_key, wait_seconds, excel_path, output_dir, min_match):
     """执行考试主流程"""
     from playwright.async_api import async_playwright
 
@@ -245,19 +245,47 @@ async def run_exam(name, phone, city, env_key, wait_seconds, excel_path, output_
                 await options[0].click()
 
         # 报告
-        log(f"📊 答题完成: 总题数 {total_q} | 匹配 {matched_q} | 未匹配 {len(unmatched_details)}")
+        match_rate = (matched_q / total_q * 100) if total_q > 0 else 0
+        log(f"📊 答题完成: 总题数 {total_q} | 匹配 {matched_q} | 未匹配 {len(unmatched_details)} | 匹配率 {match_rate:.1f}%")
 
         # 答题预览截图
         preview_path = os.path.join(output_dir, "exam_preview.png")
         await page.screenshot(path=preview_path, full_page=True)
         log(f"📸 答题预览截图已保存: {preview_path}")
 
-        # 等待
+        # 匹配度检查
+        if match_rate < min_match:
+            log(f"⚠️ 匹配率 {match_rate:.1f}% 低于阈值 {min_match}%，停止交卷！")
+            log(f"❌ 未达标题目详情:")
+            for detail in unmatched_details:
+                log(f"   {detail}")
+            log(f"📍 如需强制交卷，请重新运行并添加参数: --min-match 0")
+            await browser.close()
+            return None  # 返回 None 表示未交卷
+
+        log(f"✅ 匹配率 {match_rate:.1f}% >= {min_match}%，条件满足")
+
+        # 等待（支持提前交卷：在 output_dir 下创建 submit_now.txt 即可触发）
+        submit_signal_path = os.path.join(output_dir, "submit_now.txt")
+        # 清除可能残留的旧信号文件
+        if os.path.exists(submit_signal_path):
+            os.remove(submit_signal_path)
+
         log(f"⏳ 开始挂机等待 {wait_seconds} 秒（防作弊检测）...")
-        for remaining in range(wait_seconds, 0, -30):
-            mins, secs = divmod(remaining, 60)
-            log(f"   剩余等待: {mins}分{secs}秒...")
-            await asyncio.sleep(min(30, remaining))
+        log(f"💡 如需提前交卷，请创建文件: {submit_signal_path}")
+        elapsed = 0
+        while elapsed < wait_seconds:
+            # 检查提前交卷信号
+            if os.path.exists(submit_signal_path):
+                log(f"🚀 检测到提前交卷信号，已等待 {elapsed} 秒，立即交卷！")
+                os.remove(submit_signal_path)
+                break
+            remaining = wait_seconds - elapsed
+            if remaining > 0 and elapsed % 30 == 0:
+                mins, secs = divmod(remaining, 60)
+                log(f"   剩余等待: {mins}分{secs}秒...")
+            await asyncio.sleep(5)
+            elapsed += 5
         log("✅ 等待完毕，开始提交...")
 
         # 提交
@@ -304,6 +332,8 @@ def main():
                         help="答完等待秒数（默认600）")
     parser.add_argument("--excel", default=None,
                         help="题库路径（默认使用同目录下 question_bank.xlsx）")
+    parser.add_argument("--min-match", type=int, default=95,
+                        help="最低匹配率阈值(%%)，低于此值不交卷（默认95）")
     parser.add_argument("--output-dir", default=".",
                         help="截图保存目录（默认当前目录）")
     args = parser.parse_args()
@@ -335,11 +365,19 @@ def main():
             env_key=args.env,
             wait_seconds=args.wait,
             excel_path=excel_path,
-            output_dir=output_dir
+            output_dir=output_dir,
+            min_match=args.min_match
         ))
-        print(f"\n{'='*40}")
-        print(f"  考试完成！成绩: {score}")
-        print(f"{'='*40}")
+        if score is None:
+            # 匹配率不足，未交卷
+            print(f"\n{'='*40}")
+            print(f"  未交卷：匹配率不足 {args.min_match}%")
+            print(f"{'='*40}")
+            sys.exit(2)
+        else:
+            print(f"\n{'='*40}")
+            print(f"  考试完成！成绩: {score}")
+            print(f"{'='*40}")
     except Exception as e:
         log(f"❌ 执行失败: {e}")
         import traceback
