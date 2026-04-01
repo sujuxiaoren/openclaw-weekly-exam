@@ -8,6 +8,7 @@ import sys
 import re
 import subprocess
 import importlib
+import json
 from datetime import datetime
 
 # 国内镜像
@@ -170,7 +171,7 @@ def load_question_bank(excel_path):
     return question_db
 
 
-async def run_exam(name, phone, city, env_key, wait_seconds, excel_path, output_dir, min_match):
+async def run_exam(name, phone, city, env_key, excel_path, output_dir):
     """执行考试主流程"""
     from playwright.async_api import async_playwright
 
@@ -264,47 +265,50 @@ async def run_exam(name, phone, city, env_key, wait_seconds, excel_path, output_
 
         # 报告
         match_rate = (matched_q / total_q * 100) if total_q > 0 else 0
-        log(f"📊 答题完成: 总题数 {total_q} | 匹配 {matched_q} | 未匹配 {len(unmatched_details)} | 匹配率 {match_rate:.1f}%")
+        match_info = f"总题数 {total_q} | 匹配 {matched_q} | 未匹配 {len(unmatched_details)} | 匹配率 {match_rate:.1f}%"
+        log(f"📊 答题完成: {match_info}")
 
         # 答题预览截图
         preview_path = os.path.join(output_dir, "exam_preview.png")
         await page.screenshot(path=preview_path, full_page=True)
         log(f"📸 答题预览截图已保存: {preview_path}")
 
-        # 匹配度检查
-        if match_rate < min_match:
-            log(f"⚠️ 匹配率 {match_rate:.1f}% 低于阈值 {min_match}%，停止交卷！")
-            log(f"❌ 未达标题目详情:")
-            for detail in unmatched_details:
-                log(f"   {detail}")
-            log(f"📍 如需强制交卷，请重新运行并添加参数: --min-match 0")
-            await browser.close()
-            return None  # 返回 None 表示未交卷
+        # 写入 waiting_submit 状态
+        state_file = os.path.join(output_dir, "state.json")
+        with open(state_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "status": "waiting_submit",
+                "match_rate": match_rate,
+                "match_info": match_info,
+                "preview_path": preview_path,
+                "unmatched": unmatched_details
+            }, f, ensure_ascii=False)
 
-        log(f"✅ 匹配率 {match_rate:.1f}% >= {min_match}%，条件满足")
-
-        # 等待（支持提前交卷：在 output_dir 下创建 submit_now.txt 即可触发）
+        # 挂机等待用户的交卷信号
         submit_signal_path = os.path.join(output_dir, "submit_now.txt")
-        # 清除可能残留的旧信号文件
         if os.path.exists(submit_signal_path):
             os.remove(submit_signal_path)
 
-        log(f"⏳ 开始挂机等待 {wait_seconds} 秒（防作弊检测）...")
-        log(f"💡 如需提前交卷，请创建文件: {submit_signal_path}")
+        log("⏳ 答题完成！已输出状态文件，进入后台挂机等待用户指令...")
+        log(f"💡 请查看截图确认。确认完毕后，请创建文件: {submit_signal_path} 来交卷。")
+        
         elapsed = 0
-        while elapsed < wait_seconds:
-            # 检查提前交卷信号
+        while elapsed < 3600:  # 最大挂机 1 小时
             if os.path.exists(submit_signal_path):
-                log(f"🚀 检测到提前交卷信号，已等待 {elapsed} 秒，立即交卷！")
+                log("🚀 检测到交卷信号，立即开始交卷！")
                 os.remove(submit_signal_path)
                 break
-            remaining = wait_seconds - elapsed
-            if remaining > 0 and elapsed % 30 == 0:
-                mins, secs = divmod(remaining, 60)
-                log(f"   剩余等待: {mins}分{secs}秒...")
-            await asyncio.sleep(5)
-            elapsed += 5
-        log("✅ 等待完毕，开始提交...")
+            await asyncio.sleep(2)
+            elapsed += 2
+            
+        if elapsed >= 3600:
+            log("超时：1小时未收到交卷信号，强制关闭。未交卷。")
+            with open(state_file, "w", encoding="utf-8") as f:
+                json.dump({"status": "timeout_closed"}, f, ensure_ascii=False)
+            await browser.close()
+            return None
+            
+        log("✅ 收到交卷信号，开始提交...")
 
         # 提交
         await page.click('#ctlNext')
@@ -329,10 +333,17 @@ async def run_exam(name, phone, city, env_key, wait_seconds, excel_path, output_
         log(f"📸 最终成绩截图已保存: {score_path}")
 
         log(f"🎉 提交完成！最终成绩: {score_text}")
-        log(f"📊 统计: 总题 {total_q} | 匹配 {matched_q} | 未匹配 {len(unmatched_details)}")
         log(f"📁 截图文件:")
         log(f"   - 答题预览: {preview_path}")
         log(f"   - 最终成绩: {score_path}")
+
+        # 写入 done 状态
+        with open(state_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "status": "done",
+                "score": score_text,
+                "score_path": score_path
+            }, f, ensure_ascii=False)
 
         await browser.close()
         return score_text
@@ -346,12 +357,8 @@ def main():
     parser.add_argument("--env", default="wecom_android",
                         choices=list(ENV_CONFIGS.keys()),
                         help="模拟环境（默认wecom_android）")
-    parser.add_argument("--wait", type=int, default=600,
-                        help="答完等待秒数（默认600）")
     parser.add_argument("--excel", default=None,
                         help="题库路径（默认使用同目录下 question_bank.xlsx）")
-    parser.add_argument("--min-match", type=int, default=95,
-                        help="最低匹配率阈值(%%)，低于此值不交卷（默认95）")
     parser.add_argument("--output-dir", default=".",
                         help="截图保存目录（默认当前目录）")
     args = parser.parse_args()
@@ -374,6 +381,10 @@ def main():
     output_dir = os.path.abspath(args.output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
+    state_file = os.path.join(output_dir, "state.json")
+    with open(state_file, "w", encoding="utf-8") as f:
+        json.dump({"status": "running"}, f, ensure_ascii=False)
+
     # 运行考试
     try:
         score = asyncio.run(run_exam(
@@ -381,23 +392,17 @@ def main():
             phone=args.phone,
             city=args.city,
             env_key=args.env,
-            wait_seconds=args.wait,
             excel_path=excel_path,
-            output_dir=output_dir,
-            min_match=args.min_match
+            output_dir=output_dir
         ))
-        if score is None:
-            # 匹配率不足，未交卷
-            print(f"\n{'='*40}")
-            print(f"  未交卷：匹配率不足 {args.min_match}%")
-            print(f"{'='*40}")
-            sys.exit(2)
-        else:
+        if score is not None:
             print(f"\n{'='*40}")
             print(f"  考试完成！成绩: {score}")
             print(f"{'='*40}")
     except Exception as e:
         log(f"❌ 执行失败: {e}")
+        with open(state_file, "w", encoding="utf-8") as f:
+            json.dump({"status": "error", "message": str(e)}, f, ensure_ascii=False)
         import traceback
         traceback.print_exc()
         sys.exit(1)

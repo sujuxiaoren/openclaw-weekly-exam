@@ -1,11 +1,11 @@
 ---
 name: weekly-exam
-description: 自动完成周周考在线考试（问卷星），输入姓名、手机号和等待时间即可自动答题并提交。
+description: 自动完成周周考在线考试（问卷星），支持长时后台挂机防作弊，答完题后可发截图给用户手动确认交卷。
 user-invocable: true
 metadata:
   openclaw:
     requires:
-      bins: ["python3", "pip"]
+      bins: ["python3", "pip", "nohup", "cat", "grep"]
 ---
 
 # 周周考自动答题 Skill
@@ -17,115 +17,102 @@ metadata:
 
 ## 需要的参数
 
-使用此 Skill 前，必须向用户收集以下信息：
-
 | 参数 | 是否必填 | 默认值 | 说明 |
 |------|---------|--------|------|
 | 姓名 | ✅ 必填 | - | 考试用的真实姓名 |
 | 手机号 | ✅ 必填 | - | 考试用的手机号 |
 | 地市 | 可选 | 南宁 | 可选：南宁/柳州/桂林/梧州/北海/防城港/钦州/贵港/玉林/百色/贺州/河池/来宾/崇左 |
-| 模拟环境 | 可选 | wecom_android | 见下表 |
-| 等待时间(秒) | 可选 | 600 | 答完题后等待多少秒再提交（建议600秒以上防作弊检测） |
-
-### 模拟环境参数对照表
-
-| 用户说法 | --env 参数值 | 含义 |
-|---------|-------------|------|
-| 企业微信苹果/iPhone | `wecom_iphone` | 模拟 iPhone 上的企业微信浏览器 |
-| 企业微信安卓（默认） | `wecom_android` | 模拟 Android 上的企业微信浏览器 |
-| 微信苹果 | `wechat_iphone` | 模拟 iPhone 上的微信浏览器 |
-| 微信安卓 | `wechat_android` | 模拟 Android 上的微信浏览器 |
-| 电脑浏览器/PC | `pc` | 模拟桌面 Chrome 浏览器 |
+| 模拟环境 | 可选 | wecom_android | wecom_iphone / wecom_android / wechat_iphone / wechat_android / pc |
 
 ## 安装初始化（安装 Skill 时立即执行）
 
-当用户安装此 Skill 后，**你必须立即执行以下命令**完成环境初始化：
+当用户首次安装此 Skill 后，**你必须执行以下命令**一次以初始化环境：
 
 ```bash
 cd <此skill所在目录>
 bash setup.sh
 ```
 
-安装完成后告知用户"环境已就绪，随时可以考试"。
+## 工作流（必读核心逻辑）
 
-## 工作流
+因为防作弊要求保持在线，脚本不能阻塞大模型执行（会导致超时断开）。因此脚本以**后台运行**形式工作，你通过轮询状态文件 (`state.json`) 来跟进进度。
 
-> **重要提示：** 此脚本执行时间较长（答题约 1-2 分钟 + 挂机等待默认 600 秒）。
-> 在挂机等待阶段，脚本输出会暂停，这是正常的防作弊等待，**不是卡住了**。
-> 你应该在关键节点主动向用户报告进度。
+---
 
-### 第一步：运行脚本
+### 第一步：后台启动考试并等待答题完成
+
+**你必须原样执行以下 bash 脚本**，它会启动后台进程，并阻塞约 15 秒等待答题完成：
 
 ```bash
 cd <此skill所在目录>
-python3 exam_auto.py --name "用户姓名" --phone "用户手机号" --city "地市" --env "模拟环境" --wait 等待秒数 --output-dir ./exam_output
+mkdir -p ./exam_output
+rm -f ./exam_output/state.json ./exam_output/submit_now.txt
+
+echo "正在启动后台进程..."
+# 启动后台进程
+nohup python3 exam_auto.py --name "用户姓名" --phone "用户手机号" --city "地市" --env "模拟环境" --output-dir ./exam_output > run.log 2>&1 &
+
+echo "等待脚本答题 (约 10-20 秒)..."
+# 轮询状态文件直到答题完成
+for i in {1..30}; do
+  if grep -q '"waiting_submit"' ./exam_output/state.json 2>/dev/null; then
+    break
+  fi
+  if grep -q '"error"' ./exam_output/state.json 2>/dev/null; then
+    break
+  fi
+  sleep 2
+done
+
+cat ./exam_output/state.json
 ```
 
-**参数示例：**
+**执行并读取 JSON 输出结果：**
+- 提取 `match_info`（匹配情况）。
+- 提取 `preview_path`（通常是 `./exam_output/exam_preview.png`）。
+
+**你必须立即发起回复给用户：**
+1. **发送预览截图** `exam_preview.png`。
+2. 告知**匹配情况**。如果匹配率低于 90%，提醒用户谨慎交卷。
+3. 告诉用户："答题已完成并进入后台挂机等候。请确认截图，准备好后，随时对我说'交卷'即可。"
+
+之后你可以结束工具调用，等待用户的下一次对话指令。
+
+---
+
+### 第二步：处理用户的交卷请求
+
+当用户回复"交卷"、"提交"等指令时，**你必须原样执行以下 bash 脚本**，向后台发送交卷信号并等待提交结果（约 5-10 秒）：
+
 ```bash
-python3 exam_auto.py --name "张三" --phone "13800138000" --city "南宁" --env "wecom_android" --wait 600 --output-dir ./exam_output
+cd <此skill所在目录>
+# 向后台进程发送交卷信号
+touch ./exam_output/submit_now.txt
+
+echo "等待脚本交卷..."
+for i in {1..15}; do
+  if grep -q '"done"' ./exam_output/state.json 2>/dev/null; then
+    break
+  fi
+  if grep -q '"timeout_closed"' ./exam_output/state.json 2>/dev/null; then
+    break
+  fi
+  sleep 2
+done
+
+cat ./exam_output/state.json
 ```
 
-### 第二步：答题完成后（脚本输出 "📊 答题完成" 时）
+**执行并读取 JSON 输出结果：**
+- 提取 `score_path` 和 `score`。
 
-此时脚本已完成答题，`exam_output/exam_preview.png` 已生成。**你必须立即：**
+**你必须立即发起回复给用户：**
+1. **发送成绩截图** `exam_score.png`。
+2. 汇报最终成绩。
 
-1. **发送 `exam_preview.png` 截图给用户**
-2. **报告匹配情况**（从脚本输出中提取匹配率）
-3. **告知用户当前状态**，例如："答题已完成，匹配率 98.5%，正在挂机等待 10 分钟后自动交卷。如果你想提前交卷，随时告诉我。"
+---
 
-如果你具备视觉能力，请同时解读截图内容。
+## 异常与超时说明
 
-### 第三步：匹配度检查
-
-**匹配率 >= 95%** → 脚本自动进入等待，无需你操作，等待交卷即可。
-
-**匹配率 < 95%** → 脚本已自动停止（exit code 2，不会交卷）。你必须：
-- 告知用户匹配率不足，已停止交卷
-- 展示预览截图
-- 询问用户是否要强制交卷
-- 如果用户同意，重新运行脚本并添加 `--min-match 0` 参数
-
-### 第四步：处理用户的提前交卷请求
-
-在挂机等待期间，如果用户说"交卷"、"提前提交"、"现在就交"等：
-
-```bash
-touch <output-dir>/submit_now.txt
-```
-
-脚本会在 5 秒内检测到并立即提交。告知用户："收到，正在提前交卷..."
-
-### 第五步：交卷完成后
-
-提交完成后，`exam_output/exam_score.png` 已生成。**你必须立即：**
-
-1. **发送 `exam_score.png` 截图给用户**
-2. **报告最终成绩**（从脚本输出中提取）
-
-如果你具备视觉能力，请同时解读截图中的成绩。
-
-## 关键时间节点说明
-
-| 阶段 | 大约耗时 | 你应该做什么 |
-|------|---------|------------|
-| 安装依赖 | 首次约 2-3 分钟 | 告知用户正在安装 |
-| 填写信息+答题 | 1-2 分钟 | 等待脚本执行 |
-| 答题完成 | 瞬间 | **立即发送预览截图 + 匹配情况** |
-| 挂机等待 | 默认 600 秒 | 告知用户正在等待，可随时提前交卷 |
-| 交卷完成 | 瞬间 | **立即发送成绩截图 + 最终成绩** |
-
-## 错误处理
-
-| 退出码 | 含义 | 处理方式 |
-|--------|------|---------|
-| 0 | 成功交卷 | 展示成绩截图 |
-| 2 | 匹配率不足，未交卷 | 告知用户，询问是否强制交卷 |
-| 1 | 其他错误 | 告知用户错误信息 |
-
-## 注意事项
-
-- 等待时间建议设置为 600 秒（10 分钟）以上，过短可能触发反作弊
-- 题库文件 `question_bank.xlsx` 可自行替换更新
-- 此 Skill 需要网络连接来访问考试页面
-- 此 Skill 需要运行在有 Python 3.8+ 的环境中
+- 后台进程最多等待 **1小时**。如果用户超过 1 小时未说"交卷"，后台会自动关闭（状态变为 `timeout_closed`），当用户再次要求交卷时，需告知已超时未提交。
+- 如果在任一部读取到了 `error` 状态，请向用户汇报 JSON 中的 `message` 字段报错信息。
