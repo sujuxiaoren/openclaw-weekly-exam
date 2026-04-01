@@ -37,11 +37,22 @@ metadata:
 | 微信安卓 | `wechat_android` | 模拟 Android 上的微信浏览器 |
 | 电脑浏览器/PC | `pc` | 模拟桌面 Chrome 浏览器 |
 
+## 安装初始化（安装 Skill 时立即执行）
+
+当用户安装此 Skill 后，**你必须立即执行以下命令**完成环境初始化，不要等到用户要求考试时才安装：
+
+```bash
+cd <此skill所在目录>
+bash setup.sh
+```
+
+这会安装 openpyxl、playwright 和 Chromium 浏览器内核。安装完成后告知用户"环境已就绪，随时可以考试"。
+
 ## 工作流
 
 ### 第一步：运行脚本
 
-脚本会自动检测并安装所需依赖。直接执行：
+脚本会自动检测依赖是否已安装（正常情况下安装 Skill 时已完成）。直接执行：
 
 ```bash
 cd <此skill所在目录>
