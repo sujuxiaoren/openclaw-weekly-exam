@@ -58,20 +58,7 @@ def normalize_text(text):
 
 
 def _get_playwright_driver_cmd():
-    """获取 Playwright 驱动命令（兼容新旧版本 API）"""
-    try:
-        from playwright._impl._driver import compute_driver_executable
-        result = compute_driver_executable()
-        # 新版返回 tuple (executable, env)，旧版返回 str
-        if isinstance(result, tuple):
-            driver_path = str(result[0])
-        else:
-            driver_path = str(result)
-        if os.path.isfile(driver_path):
-            return [driver_path]
-    except Exception:
-        pass
-    # 兜底：使用 python -m playwright
+    """获取 Playwright 驱动命令（统一使用 python -m playwright，避免底层 Node 模块在沙箱中路径异常）"""
     return [sys.executable, "-m", "playwright"]
 
 
@@ -102,6 +89,17 @@ def ensure_dependencies():
 
     chromium_found = False
     browsers_path = env.get("PLAYWRIGHT_BROWSERS_PATH", "")
+    
+    # 如果没设环境变量，去各操作系统默认路径找
+    if not browsers_path:
+        if sys.platform == "win32":
+            local_app_data = os.environ.get("LOCALAPPDATA", os.path.join(os.environ.get("USERPROFILE", ""), "AppData", "Local"))
+            browsers_path = os.path.join(local_app_data, "ms-playwright")
+        elif sys.platform == "darwin":
+            browsers_path = os.path.expanduser("~/Library/Caches/ms-playwright")
+        else:
+            browsers_path = os.path.expanduser("~/.cache/ms-playwright")
+
     if browsers_path and os.path.isdir(browsers_path):
         for item in os.listdir(browsers_path):
             item_path = os.path.join(browsers_path, item)
