@@ -6,7 +6,8 @@ import asyncio
 import os
 import sys
 import re
-import time
+import subprocess
+import importlib
 from datetime import datetime
 
 # 国内镜像
@@ -58,40 +59,52 @@ def ensure_dependencies():
     """检查并安装依赖"""
     # 检查 openpyxl
     try:
-        import openpyxl
+        importlib.import_module('openpyxl')
         log("✅ openpyxl 已安装")
     except ImportError:
         log("📥 正在安装 openpyxl...")
-        os.system(f"{sys.executable} -m pip install openpyxl -q")
-        import openpyxl
+        subprocess.run([sys.executable, "-m", "pip", "install", "openpyxl", "-q"], check=True)
+        log("✅ openpyxl 安装完成")
 
     # 检查 playwright
     try:
-        import playwright
+        importlib.import_module('playwright')
         log("✅ playwright 已安装")
     except ImportError:
         log("📥 正在安装 playwright...")
-        os.system(f"{sys.executable} -m pip install playwright -q")
+        subprocess.run([sys.executable, "-m", "pip", "install", "playwright", "-q"], check=True)
+        log("✅ playwright 安装完成")
 
-    # 检查 chromium
+    # 检查 chromium 是否已安装（查找实际可执行文件）
     from playwright._impl._driver import compute_driver_executable, get_driver_env
     driver_executable = compute_driver_executable()
     env = get_driver_env()
     env["PLAYWRIGHT_DOWNLOAD_HOST"] = PLAYWRIGHT_CDN_MIRROR
 
-    # 尝试检测 chromium 是否已安装
-    browsers_path = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "")
     chromium_found = False
+    browsers_path = env.get("PLAYWRIGHT_BROWSERS_PATH", os.environ.get("PLAYWRIGHT_BROWSERS_PATH", ""))
     if browsers_path and os.path.isdir(browsers_path):
         for item in os.listdir(browsers_path):
-            if "chromium" in item and os.path.isdir(os.path.join(browsers_path, item)):
-                chromium_found = True
+            item_path = os.path.join(browsers_path, item)
+            if not item.startswith("chromium") or not os.path.isdir(item_path):
+                continue
+            # 查找实际的 chrome 可执行文件
+            for root, dirs, files in os.walk(item_path):
+                for f in files:
+                    if f in ("chrome", "chrome.exe", "chrome-headless-shell", "chrome-headless-shell.exe"):
+                        chromium_found = True
+                        break
+                if chromium_found:
+                    break
+            if chromium_found:
                 break
 
     if not chromium_found:
         log("📥 正在使用国内镜像下载 Chromium（约 150MB）...")
         log(f"📡 下载源: {PLAYWRIGHT_CDN_MIRROR}")
-        import subprocess
+        # 先尝试安装系统依赖（Linux）
+        if sys.platform == "linux":
+            subprocess.run([str(driver_executable), "install-deps", "chromium"], env=env)
         result = subprocess.run(
             [str(driver_executable), "install", "chromium"],
             env=env, capture_output=True, text=True
@@ -100,10 +113,8 @@ def ensure_dependencies():
             log("✅ Chromium 安装成功")
         else:
             log(f"❌ Chromium 安装失败: {result.stderr}")
-            log("尝试安装系统依赖: playwright install-deps chromium")
-            subprocess.run([str(driver_executable), "install-deps", "chromium"], env=env)
-            # 重试
-            subprocess.run([str(driver_executable), "install", "chromium"], env=env)
+            log("请手动执行: playwright install chromium")
+            sys.exit(1)
     else:
         log("✅ Chromium 已就绪")
 

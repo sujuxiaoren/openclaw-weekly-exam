@@ -24,34 +24,28 @@ metadata:
 | 姓名 | ✅ 必填 | - | 考试用的真实姓名 |
 | 手机号 | ✅ 必填 | - | 考试用的手机号 |
 | 地市 | 可选 | 南宁 | 可选：南宁/柳州/桂林/梧州/北海/防城港/钦州/贵港/玉林/百色/贺州/河池/来宾/崇左 |
-| 模拟环境 | 可选 | wecom_android | 可选：wecom_iphone/wecom_android/wechat_iphone/wechat_android/pc |
+| 模拟环境 | 可选 | wecom_android | 见下表 |
 | 等待时间(秒) | 可选 | 600 | 答完题后等待多少秒再提交（建议600秒以上防作弊检测） |
+
+### 模拟环境参数对照表
+
+用户可能用自然语言描述模拟环境，请按以下对照表转换为 `--env` 参数值：
+
+| 用户说法 | --env 参数值 | 含义 |
+|---------|-------------|------|
+| 企业微信苹果/iPhone | `wecom_iphone` | 模拟 iPhone 上的企业微信浏览器 |
+| 企业微信安卓（默认） | `wecom_android` | 模拟 Android 上的企业微信浏览器 |
+| 微信苹果 | `wechat_iphone` | 模拟 iPhone 上的微信浏览器 |
+| 微信安卓 | `wechat_android` | 模拟 Android 上的微信浏览器 |
+| 电脑浏览器/PC | `pc` | 模拟桌面 Chrome 浏览器 |
 
 ## 工作流
 
-### 第一步：安装依赖
+### 第一步：运行脚本
 
-检查并安装所需 Python 包和 Chromium 浏览器内核：
+脚本会**自动检测并安装**所需的依赖（openpyxl、playwright、Chromium），无需手动安装。
 
-```bash
-pip install playwright openpyxl
-PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright playwright install chromium
-```
-
-如果 `playwright install chromium` 失败，尝试：
-```bash
-python3 -m playwright install chromium
-```
-
-### 第二步：定位脚本和题库
-
-此 Skill 目录下包含：
-- `exam_auto.py` — 自动答题 CLI 脚本
-- `question_bank.xlsx` — 题库 Excel 文件
-
-### 第三步：运行脚本
-
-使用收集到的参数执行脚本：
+直接使用收集到的参数执行脚本：
 
 ```bash
 cd <此skill所在目录>
@@ -63,17 +57,23 @@ python3 exam_auto.py --name "用户姓名" --phone "用户手机号" --city "地
 python3 exam_auto.py --name "张三" --phone "13800138000" --city "南宁" --env "wecom_android" --wait 600 --output-dir ./exam_output
 ```
 
-### 第四步：展示答题预览截图
+> 注意：第一次运行时，脚本会自动安装 Chromium 浏览器内核（约 150MB），使用国内镜像下载，无需翻墙。
+
+### 第二步：展示答题预览截图
 
 脚本答题完成后会进入挂机等待阶段，此时 `--output-dir` 目录下已生成 `exam_preview.png`。
 
 **你必须立即将 `exam_preview.png` 发送给用户查看**，让用户确认答题情况。这是默认行为，不需要用户要求。
 
-### 第五步：等待提交完成，展示成绩截图
+如果你具备视觉能力，**请同时解读截图内容**，告诉用户答题情况的摘要。
+
+### 第三步：等待提交完成，展示成绩截图
 
 脚本等待结束并自动提交后，会在 `--output-dir` 目录下生成 `exam_score.png`。
 
 **你必须立即将 `exam_score.png` 发送给用户查看**，告知最终成绩。这是默认行为，不需要用户要求。
+
+如果你具备视觉能力，**请同时解读截图中的成绩信息**。
 
 **总结：整个流程中你需要主动发送 2 张截图给用户：**
 1. 答题完成后 → 发送 `exam_preview.png`（答题预览）
@@ -81,8 +81,8 @@ python3 exam_auto.py --name "张三" --phone "13800138000" --city "南宁" --env
 
 ## 错误处理
 
-- 如果依赖安装失败，提示用户检查网络连接或手动安装
-- 如果浏览器启动失败，提示可能需要安装系统依赖：`playwright install-deps chromium`
+- 如果依赖安装失败，提示用户检查网络连接
+- 如果浏览器启动失败（Linux 环境），尝试运行 `playwright install-deps chromium` 安装系统依赖后重试
 - 如果部分题目未匹配到答案，告知用户未匹配的题目数量
 
 ## 注意事项
@@ -90,3 +90,4 @@ python3 exam_auto.py --name "张三" --phone "13800138000" --city "南宁" --env
 - 等待时间建议设置为 600 秒（10 分钟）以上，过短可能触发反作弊
 - 题库文件 `question_bank.xlsx` 可自行替换更新
 - 此 Skill 需要网络连接来访问考试页面
+- 此 Skill 需要运行在有 Python 3.8+ 的环境中
