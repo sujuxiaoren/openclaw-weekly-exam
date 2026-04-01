@@ -63,23 +63,21 @@ python3 exam_auto.py --name "用户姓名" --phone "用户手机号" --city "地
 python3 exam_auto.py --name "张三" --phone "13800138000" --city "南宁" --env "wecom_android" --wait 600 --output-dir ./exam_output
 ```
 
-### 第四步：返回结果
+### 第四步：展示答题预览截图
 
-脚本会输出以下信息：
-- 题库加载统计
-- 每道题的匹配情况
-- 等待倒计时
-- 最终提交的成绩
+脚本答题完成后会进入挂机等待阶段，此时 `--output-dir` 目录下已生成 `exam_preview.png`。
 
-将最终成绩反馈给用户。
+**你必须立即将 `exam_preview.png` 发送给用户查看**，让用户确认答题情况。这是默认行为，不需要用户要求。
 
-### 第五步：展示截图
+### 第五步：等待提交完成，展示成绩截图
 
-脚本会在 `--output-dir` 指定的目录下生成两张截图：
-- `exam_preview.png` — 答题完成后的预览截图（显示所有已选答案）
-- `exam_score.png` — 提交后的最终成绩截图
+脚本等待结束并自动提交后，会在 `--output-dir` 目录下生成 `exam_score.png`。
 
-将这两张截图展示给用户查看。
+**你必须立即将 `exam_score.png` 发送给用户查看**，告知最终成绩。这是默认行为，不需要用户要求。
+
+**总结：整个流程中你需要主动发送 2 张截图给用户：**
+1. 答题完成后 → 发送 `exam_preview.png`（答题预览）
+2. 交卷完成后 → 发送 `exam_score.png`（最终成绩）
 
 ## 错误处理
 
