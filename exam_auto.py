@@ -141,7 +141,7 @@ def load_question_bank(excel_path):
     return question_db
 
 
-async def run_exam(name, phone, city, env_key, wait_seconds, excel_path):
+async def run_exam(name, phone, city, env_key, wait_seconds, excel_path, output_dir):
     """执行考试主流程"""
     from playwright.async_api import async_playwright
 
@@ -236,6 +236,11 @@ async def run_exam(name, phone, city, env_key, wait_seconds, excel_path):
         # 报告
         log(f"📊 答题完成: 总题数 {total_q} | 匹配 {matched_q} | 未匹配 {len(unmatched_details)}")
 
+        # 答题预览截图
+        preview_path = os.path.join(output_dir, "exam_preview.png")
+        await page.screenshot(path=preview_path, full_page=True)
+        log(f"📸 答题预览截图已保存: {preview_path}")
+
         # 等待
         log(f"⏳ 开始挂机等待 {wait_seconds} 秒（防作弊检测）...")
         for remaining in range(wait_seconds, 0, -30):
@@ -261,8 +266,16 @@ async def run_exam(name, phone, city, env_key, wait_seconds, excel_path):
             if await score_el.count() > 0:
                 score_text = await score_el.inner_text()
 
+        # 成绩截图
+        score_path = os.path.join(output_dir, "exam_score.png")
+        await page.screenshot(path=score_path, full_page=True)
+        log(f"📸 最终成绩截图已保存: {score_path}")
+
         log(f"🎉 提交完成！最终成绩: {score_text}")
         log(f"📊 统计: 总题 {total_q} | 匹配 {matched_q} | 未匹配 {len(unmatched_details)}")
+        log(f"📁 截图文件:")
+        log(f"   - 答题预览: {preview_path}")
+        log(f"   - 最终成绩: {score_path}")
 
         await browser.close()
         return score_text
@@ -280,6 +293,8 @@ def main():
                         help="答完等待秒数（默认600）")
     parser.add_argument("--excel", default=None,
                         help="题库路径（默认使用同目录下 question_bank.xlsx）")
+    parser.add_argument("--output-dir", default=".",
+                        help="截图保存目录（默认当前目录）")
     args = parser.parse_args()
 
     # 题库路径
@@ -296,6 +311,10 @@ def main():
     # 确保依赖
     ensure_dependencies()
 
+    # 确保输出目录存在
+    output_dir = os.path.abspath(args.output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+
     # 运行考试
     try:
         score = asyncio.run(run_exam(
@@ -304,7 +323,8 @@ def main():
             city=args.city,
             env_key=args.env,
             wait_seconds=args.wait,
-            excel_path=excel_path
+            excel_path=excel_path,
+            output_dir=output_dir
         ))
         print(f"\n{'='*40}")
         print(f"  考试完成！成绩: {score}")

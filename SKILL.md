@@ -55,12 +55,12 @@ python3 -m playwright install chromium
 
 ```bash
 cd <此skill所在目录>
-python3 exam_auto.py --name "用户姓名" --phone "用户手机号" --city "地市" --env "模拟环境" --wait 等待秒数
+python3 exam_auto.py --name "用户姓名" --phone "用户手机号" --city "地市" --env "模拟环境" --wait 等待秒数 --output-dir ./exam_output
 ```
 
 **参数示例：**
 ```bash
-python3 exam_auto.py --name "张三" --phone "13800138000" --city "南宁" --env "wecom_android" --wait 600
+python3 exam_auto.py --name "张三" --phone "13800138000" --city "南宁" --env "wecom_android" --wait 600 --output-dir ./exam_output
 ```
 
 ### 第四步：返回结果
@@ -72,6 +72,14 @@ python3 exam_auto.py --name "张三" --phone "13800138000" --city "南宁" --env
 - 最终提交的成绩
 
 将最终成绩反馈给用户。
+
+### 第五步：展示截图
+
+脚本会在 `--output-dir` 指定的目录下生成两张截图：
+- `exam_preview.png` — 答题完成后的预览截图（显示所有已选答案）
+- `exam_score.png` — 提交后的最终成绩截图
+
+将这两张截图展示给用户查看。
 
 ## 错误处理
 
