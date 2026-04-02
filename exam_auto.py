@@ -9,6 +9,7 @@ import re
 import subprocess
 import importlib
 import json
+import urllib.request
 from datetime import datetime
 
 # 国内镜像
@@ -135,6 +136,51 @@ def ensure_dependencies():
     else:
         log("✅ Chromium 已就绪")
 
+
+def update_question_bank(excel_path):
+    """从 GitHub 同步最新题库，基于文件 SHA 校验，如果有更新则拉取"""
+    api_url = "https://api.github.com/repos/sujuxiaoren/openclaw-weekly-exam/contents/question_bank.xlsx"
+    raw_url = "https://raw.githubusercontent.com/sujuxiaoren/openclaw-weekly-exam/main/question_bank.xlsx"
+    proxy_url = "https://ghproxy.net/" + raw_url
+    sha_path = excel_path + ".sha"
+    
+    log("🔄 正在检查 GitHub 上的题库是否有更新...")
+    try:
+        # 获取远程文件的 sha 标识
+        req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            remote_sha = data.get('sha')
+            
+        local_sha = None
+        if os.path.exists(sha_path):
+            with open(sha_path, 'r', encoding='utf-8') as f:
+                local_sha = f.read().strip()
+                
+        if os.path.exists(excel_path) and local_sha == remote_sha:
+            log("✅ 本地题库已是最新版本，无需更新。")
+            return
+            
+        log("📥 发现题库有更新，正在下载最新题库...")
+        # 尝试通过默认 raw 地址下载，如果失败可使用国内加速代理
+        try:
+            req = urllib.request.Request(raw_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=15) as response, open(excel_path, 'wb') as out_file:
+                out_file.write(response.read())
+        except Exception:
+            log("⚠️ 原始 GitHub 下载通道较慢，正在切换至加速镜像通道...")
+            req = urllib.request.Request(proxy_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=15) as response, open(excel_path, 'wb') as out_file:
+                out_file.write(response.read())
+                
+        # 更新本地 sha 记录
+        with open(sha_path, 'w', encoding='utf-8') as f:
+            f.write(remote_sha)
+            
+        log("✅ 题库已成功同步至最新版本！")
+        
+    except Exception as e:
+        log(f"⚠️ 题库更新检查失败，将继续使用本地历史题库。（错误信息：{e}）")
 
 def load_question_bank(excel_path):
     """加载题库"""
@@ -367,6 +413,9 @@ def main():
     else:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         excel_path = os.path.join(script_dir, "question_bank.xlsx")
+
+    # 尝试检测并更新题库
+    update_question_bank(excel_path)
 
     if not os.path.exists(excel_path):
         log(f"❌ 题库文件不存在: {excel_path}")
