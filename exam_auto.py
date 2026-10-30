@@ -53,7 +53,8 @@ def log(msg):
 def normalize_text(text):
     if not text:
         return ""
-    text = str(text).replace("【多选题】", "").replace("【单选题】", "")
+    text = str(text).replace("【多选题】", "").replace("【单选题】", "").replace("【判断题】", "")
+    text = re.sub(r'^\s*\d+[\.\、\s]*', '', text)
     return re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', text).lower()
 
 
