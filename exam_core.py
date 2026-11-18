@@ -586,14 +586,25 @@ def build_score_summary(question_records, type_scores=None):
 
 
 async def fill_personal_info(page, name, phone, city, log_fn=print):
-    """填写问卷星开头的姓名、手机号、地市"""
+    """填写问卷星开头的姓名、手机号、地市（避免选项含关键字触发 strict mode 冲突）"""
     log_fn("📝 填写个人信息...")
-    await page.locator('.field:has-text("姓名") input').fill(name)
-    await page.locator('.field:has-text("手机") input').fill(phone)
+    name_input = page.locator(
+        '.field:has(.field-label:has-text("姓名")) input:not([type="radio"]):not([type="checkbox"])'
+    ).first
+    if await name_input.count() == 0:
+        name_input = page.locator('.field:has-text("姓名") input:not([type="radio"]):not([type="checkbox"])').first
+    await name_input.fill(name)
 
-    await page.click('.select2-container')
+    phone_input = page.locator(
+        '.field:has(.field-label:has-text("手机")) input:not([type="radio"]):not([type="checkbox"])'
+    ).first
+    if await phone_input.count() == 0:
+        phone_input = page.locator('.field:has-text("手机") input:not([type="radio"]):not([type="checkbox"])').first
+    await phone_input.fill(phone)
+
+    await page.locator('.select2-container').first.click()
     await page.wait_for_timeout(500)
-    await page.click(f'.select2-results__option:has-text("{city}")')
+    await page.locator(f'.select2-results__option:has-text("{city}")').first.click()
 
 
 async def solve_exam_questions(page, bank, log_fn=print):
@@ -603,9 +614,12 @@ async def solve_exam_questions(page, bank, log_fn=print):
     records = []
 
     for q_el in questions:
+        has_choice_widget = (
+            await q_el.locator('.ui-radio, .ui-checkbox, input[type="radio"], input[type="checkbox"]').count()
+        ) > 0
         full_label_el = q_el.locator('.field-label')
         full_label_text = await full_label_el.inner_text() if await full_label_el.count() > 0 else ""
-        if "姓名" in full_label_text or "手机" in full_label_text or "地市" in full_label_text:
+        if not has_choice_widget and any(k in full_label_text for k in ("姓名", "手机", "地市")):
             continue
 
         topic_el = q_el.locator('.field-label .topichtml')
